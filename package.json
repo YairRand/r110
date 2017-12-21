@@ -1,0 +1,22 @@
+{
+  "name": "r110",
+  "version": "0.0.1",
+  "description": "Tool for fiddling with Rule 110. WIP.",
+  "main": "main.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YairRand/r110.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/YairRand/r110/issues"
+  },
+  "homepage": "https://github.com/YairRand/r110#readme",
+  "devDependencies": {
+    "mocha": "^4.0.1"
+  }
+}

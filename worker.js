@@ -193,21 +193,24 @@ function showArea( { offset, zoom, width, height } ) {
   return { dataBlock, offset, width, height };
 }
 
+var commands = {
+  "init": initMap,
+  "display": showArea,
+  "double": doubleMap,
+};
 
-
-onmessage = function ( e ) {
+this.onmessage = function ( e ) {
   var [ type, data ] = e.data;
-  //console.log( 'data', type, data );
+  console.log( 'data', type, data );
   try {
     switch ( type ) {
+      case "init":
       case "display":
-        var r = showArea( data );
+      case "double":
+        var r = commands[ type ]( data );
         complete( r );
         break;
-      case "init":
-        initMap( data );
-        complete();
-        break;
+        /*
       case "double":
         console.time();
         console.profile( 'double' );
@@ -216,6 +219,7 @@ onmessage = function ( e ) {
         console.profileEnd( 'double' );
         console.timeEnd();
         break;
+        */
       case "checkd16":
         for ( var i = 0, q = [], j; i < d16.length; i++ ) {
           j = d16[ i ];
@@ -237,6 +241,11 @@ function complete( data ) {
   postMessage( [ 'complete', data ] );
 }
 
+/**
+ * For a canvas, returns an array matching the brightness of a block.
+ * @param {Object} block
+ * @return {Number[]}
+ */
 var cellFilled = ( () => {
   var fills = { 1: [ 255, 255, 255, 255 ], 0: [ 0, 0, 0, 255 ] };
   return function cellFilled( block ) {
@@ -245,7 +254,7 @@ var cellFilled = ( () => {
     if ( f ) {
       return f;
     } else {
-      return fills[ c ] = [ 0, 0, 0, 255 ].fill( 255 * c, 0, 3 );
+      return fills[ c ] = [ 0, 0, 0, 255 ].fill( ( 255 * c ) | 0, 0, 3 );
     }
   };
 } )();
@@ -272,6 +281,14 @@ Object.assign( baseEmpty,  { "0_0": baseEmpty,  "0_1": baseEmpty,  "1_0": baseFi
 
 // Map holds outermost level. If outermost is a single 64x64 block, hold the one item.
 // Start with a single dot.
+/**
+ * Map is the outermost block, containing smaller blocks.
+ * @var {Object} map 
+ * @property {number} size Length of each side.
+ * @property {number} c Percent of blocks which are white.
+ * @property {number} n  Unique ID for each unique block.
+ * @property {Object[]} contents Child blocks: top-left, top-right, bottom-left, bottom-right.
+ */
 var map = baseFilled,
   d16 = [];
 
@@ -379,6 +396,8 @@ function initMap( data ) {
     doubleMap();
     console.log( 422, map.size );
     console.timeEnd( 'init' );
+  } else if ( data.type === 'dot' ) {
+    map = baseFilled;
   }
   
 }
@@ -471,6 +490,10 @@ function groupBlocks( tl, tr, bl, br ) {
 
 //initMap();
 
-console.log( baseFilled )
+//console.log( baseFilled )
 console.log( cc );
 console.log( d16 );
+
+this.map = map;
+this.baseFilled = baseFilled;
+var postMessage = this.postMessage = this.postMessage || function ( ...x ) { this.postMessage( ...x ); }.bind( this );
