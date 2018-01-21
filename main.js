@@ -71,20 +71,20 @@ var view = ( () => {
       // Offset of top-left canvas from 0,0, in cells.
       cOffset = { x: -windowWidth, y: -windowHeight },
       size = { x: 0, y: 0 },
-      zoom = 1,
-      
-      cWidth = windowWidth * 3,
-      cHeight = windowHeight * 3;
+      zoom,
+      cWidth,
+      cHeight;
     
-    canvases.forEach( canvas => {
-      canvas.width = cWidth;
-      canvas.height = cHeight;
-    } );
+    function setZoom( _zoom ) {
+      zoom = _zoom;
+      cWidth = windowWidth * 3;
+      cHeight = windowHeight * 3;
+    }
     
     function shiftTiles( xAxis, directionIsForward ) {
       // directionIsForward = true means rightward/downward movement, so the top row or
       // left column is being moved to the right/bottom and cleared.
-      
+      console.log( 'shiftTile' );
       // Reorder canvases.
       canvases = canvases.map( ( canvas, i, canvases ) => {
         if ( !( xAxis ? i & 1 : i & 2 ) === directionIsForward ) {
@@ -138,26 +138,38 @@ var view = ( () => {
       }
       addEventListener( 'mousemove', q );
     }
+    
+    setZoom( 1 );
+    
+    canvases.forEach( canvas => {
+      canvas.width = cWidth;
+      canvas.height = cHeight;
+    } );
+    
     forTesting();
     
     return {
       // Store data in the cached canvases.
       // All arg units are in cells, not pixels.
       storeTile( data, { x, y, width, height, zoom }, visible ) {
-        console.log( 'STORETILE', x, y, cOffset.y, zoom );
+        console.log( 'STORETILE', x, y, cOffset.y, height, width, zoom );
         
         // Dimensions of each canvas, in cells.
         var ccWidth = cWidth * zoom,
-          ccHeight = cHeight * zoom;
+          ccHeight = cHeight * zoom,
+          // Unused.
+          cWindowWidth = windowWidth * zoom,
+          cWindowHeight = windowHeight * zoom;
         
         contexts.forEach( ( ctx, i ) => {
           
           // Coordinates of the canvas, relative to absolute 0,0 of the map. In cells.
-          var cX = cOffset.x + ( ( i & 1 ) && ccWidth  ),
+          var cX = cOffset.x + ( ( i & 1 ) && ccWidth ),
             cY = cOffset.y + ( ( i & 2 ) && ccHeight );
           
           // Some issues with cells vs pixels, here. TODO: Fix.
-          if ( x < cX + ccWidth && x + width >= cX && y < cY + cHeight && y + height >= cY ) {
+          // Everything here should be in cells.
+          if ( x < cX + ccWidth && x + width >= cX && y < cY + ccHeight && y + height >= cY ) {
             console.log( 'storing in tile ', i );
             // In range.
             ctx.putImageData(
@@ -179,13 +191,14 @@ var view = ( () => {
           if ( xPixelsDiff < windowWidth ) {
             shiftTiles( true, false );
           }
-          if ( xPixelsDiff + width * zoom > cWidth * 2 - windowWidth ) {
+          if ( xPixelsDiff + ( width / zoom ) > cWidth * 2 - windowWidth ) {
             shiftTiles( true, true );
           }
           if ( yPixelsDiff < windowHeight ) {
             shiftTiles( false, false );
           }
-          if ( yPixelsDiff + height * zoom > cHeight * 2 - windowHeight ) {
+          console.log( 2222, yPixelsDiff, height / zoom, cHeight * 2 - windowHeight );
+          if ( yPixelsDiff + ( height / zoom ) > cHeight * 2 - windowHeight ) {
             shiftTiles( false, true );
           }
         }
@@ -197,7 +210,7 @@ var view = ( () => {
         
       },
       
-      printFromCache( targetContext, x, y ) {
+      printFromCache( targetContext, x, y, _zoom = zoom ) {
         console.log( 'PRINT', x, y, cOffset, cWidth, zoom );
         
         // Dimensions of each canvas, in cells.
@@ -206,13 +219,14 @@ var view = ( () => {
         
         // TODO: Maybe don't print overflow.
         canvases.forEach( ( canvas, i ) => {
-          if ( 
-            ( ( i & 1 ) ?
-              x + windowWidth > cOffset.x + ccWidth :
+          if (
+            // Check if the canvas overlaps with the view at all.
+            ( ( i & 1 ) ? // Left or right
+              x + windowWidth * zoom > cOffset.x + ccWidth :
               x < cOffset.x + ccWidth )
             &&
-            ( ( i & 2 ) ?
-              y + windowHeight > cOffset.y + ccHeight :
+            ( ( i & 2 ) ? // Top or bottom
+              y + windowHeight * zoom > cOffset.y + ccHeight :
               y < cOffset.y + ccHeight
               )
           ) {  
@@ -221,8 +235,11 @@ var view = ( () => {
             );
           }
         } );
-      }
-      
+      },
+      blank() {
+        canvases.forEach( blankCanvas );
+      },
+      setZoom,
       // So, how does the script interact with this?
       // Need to know when to shift. Can that be determined just from the requests?
       // How about this: 
@@ -245,6 +262,10 @@ var view = ( () => {
     
   } )();
   
+  function tryMaintain() {
+    dWorker.maintainDisplay( fullUpdate );
+  }
+  
   function fullUpdate() {
     lastUpdate = Date.now();
     console.log( 'fullUpdate', offset.y, visOffset.y );
@@ -256,14 +277,13 @@ var view = ( () => {
       //yDelta = visOffset.y - lOffset.y,
       yDelta = lOffset.y - visOffset.y,
       movedLeft = lOffset.x > visOffset.x,
-      movedUp = lOffset.y > visOffset.y;
+      movedUp = lOffset.y > visOffset.y,
+      promise;
     
     if ( started || Math.abs( xDelta ) > rWidth || Math.abs( yDelta ) > rHeight ) {
       // Doesn't work when zoomed. TODO: Fix.
       // Problem is, last update is attached to the top-left of where the screen
       // was before the zoom, I think.
-      
-      // New areas to the side.
       
       // Problem: Sometimes we have this situation:
       // * Move down by 1 > Request, set lOffset > Move up 2 > 
@@ -276,23 +296,32 @@ var view = ( () => {
       //   data isn't actually going onto cData (or only part of it is being
       //   placed there.)
       
-      dWorker.displayChunk( 
-        { x: movedLeft ? visOffset.x : lOffset.x + rWidth, y: visOffset.y },
-        { x: Math.abs( xDelta ) / zoom, y: yDelta / zoom + windowHeight },
-        zoom
-      );
-      // New areas above and below.
-      dWorker.displayChunk( 
-        { x: visOffset.x, y: movedUp ? 
-          visOffset.y : // Current top of screen
-          lOffset.y + rHeight // Previous bottom of screen.
-          //Math.min( lOffset.y, offset.y ) + rHeight // Previous bottom of screen.
-        },
-        { x: windowWidth, y: Math.abs( yDelta ) / zoom },
-        zoom
-      );
+      // Need to use stuff here, local variables, canvascache, and dWorker.
+      
+      promise = Promise.all( [
+        // New areas to the side.
+        dWorker.displayChunk( 
+          { x: movedLeft ? visOffset.x : lOffset.x + rWidth, y: visOffset.y },
+          { x: Math.abs( xDelta ) / zoom, y: yDelta / zoom + windowHeight },
+          zoom
+        ),
+        // New areas above and below.
+        dWorker.displayChunk( 
+          { x: visOffset.x, y: movedUp ? 
+            visOffset.y : // Current top of screen
+            lOffset.y + rHeight // Previous bottom of screen.
+            //Math.min( lOffset.y, offset.y ) + rHeight // Previous bottom of screen.
+          },
+          { x: windowWidth, y: Math.abs( yDelta ) / zoom },
+          zoom
+        )
+      ] );
+      
+      // Actually, just send some callbacks or promises or something.
+      dWorker.maintainDisplay( function () {} );
     } else {
-      dWorker.displayChunk( 
+      // Full screen.
+      promise = dWorker.displayChunk( 
         { x: visOffset.x, y: visOffset.y },
         { x: windowWidth, y: windowHeight },
         zoom
@@ -300,6 +329,7 @@ var view = ( () => {
     }
     Object.assign( lOffset, visOffset );
     started = true;
+    return promise;
   }
   
   function fullScreenUpdate() {
@@ -336,9 +366,7 @@ var view = ( () => {
   
   function changeZoom( dir, x, y ) {
     var change = ( 2 ** dir ),
-      toZoom = zoom * change,
-      // Unused.
-      _cData = cData;
+      toZoom = zoom * change;
     
     
     if ( !zoomAnimating ) {
@@ -357,10 +385,17 @@ var view = ( () => {
             
             var scale = ( change ** ( 0.1 * step ) );
             
+            false && hiddenCanvases.printFromCache( ctx,
+              ( visOffset.x - x * ( zoom * scale - zoom ) ) / zoom / scale,
+              ( visOffset.y - y * ( zoom * scale - zoom ) ) / zoom / scale,
+              zoom * scale
+            );
+            
             // PROBLEM: Dragging then zooming has things mess up during animation.
             // Fixes after resolution...?
             
-            ctx.drawImage( hiddenCanvas,
+            
+            false && ctx.drawImage( hiddenCanvas,
               // Center the zoom animation around the movement from the cursor.
               //( offset.x - ( visOffset.x - x * ( zoom * scale - zoom ) ) ) / zoom / scale,
               //( offset.y - ( visOffset.y - y * ( zoom * scale - zoom ) ) ) / zoom / scale,
@@ -386,7 +421,10 @@ var view = ( () => {
         
         zoom = toZoom;
         
-        view.paint( data );
+        //view.paint( data );
+        
+        hiddenCanvases.blank();
+        hiddenCanvases.setZoom( zoom );
         
         zoomAnimating = false;
         return;
@@ -621,6 +659,9 @@ var dWorker = ( () => {
         if ( c.callback ) {
           c.callback( data );
         }
+        if ( c.resolve ) {
+          c.resolve( data );
+        }
         //view.paint( data );
         break;
       case 'error':
@@ -632,20 +673,23 @@ var dWorker = ( () => {
   
   function cmd( type, data, callback ) {
     pendingCount++;
-    pending.push( { callback } ); // Can change this to use a promise instead.
-    worker.postMessage( [ type, data ] );
+    var promise = new Promise( ( resolve ) => {
+      pending.push( { callback, resolve } ); // Can change this to use a promise instead.
+      worker.postMessage( [ type, data ] );
+    } );
+    return promise;
   }
   
   return {
     display( offset, zoom = 1 ) {
       console.log( '.display' );
-      cmd( 'display', { offset, zoom, width: windowWidth, height: windowHeight }, data => view.paint( data ) );
+      return cmd( 'display', { offset, zoom, width: windowWidth, height: windowHeight }, data => view.paint( data ) );
     },
     // offset measured in cells, size in pixels.
     displayChunk( offset, size, zoom = 1 ) {
       console.log( '.displayChunk', arguments );
       if ( size.x !== 0 && size.y !== 0 ) {
-        cmd( 'display', { offset, zoom, width: size.x, height: size.y }, data => view.paint( data ) );
+        return cmd( 'display', { offset, zoom, width: size.x, height: size.y }, data => view.paint( data ) );
       }
     },
     maintainDisplay: ( () => {
@@ -668,15 +712,28 @@ var dWorker = ( () => {
       
       // View has current loc.
       
+      // Update priorities:
+      // 1. Anything on-screen now. 
+      // 2. Whatever's necessary to fill out the box. If moved down-right by 
+      //    10px, prepare to fill in the two 10px/10px boxes in each corner.
+      // 3. Surround the screen, fill out the canvas caches.
+      // 
+      // So, maybe do something else for the corners.
+      // If we move again a bunch before 2 (corner squares) starts, should they
+      // take priority?
+      
       return function maintainDisplay( data, callback ) {
-        var promise = new Promise( ( complete, err ) => {
-          cmd( 'display', { offset, zoom, width: size.x, height: size.y }, complete );
-        } );
-        
-        promise.then( () => {
+        if ( inprogress === false ) {
+          inprogress = true;
           
-        } );
-        
+          var promise = new Promise( ( complete, err ) => {
+            cmd( 'display', { offset, zoom, width: size.x, height: size.y }, complete );
+          } );
+          
+          promise.then( () => {
+            
+          } );
+        }
         
       }
     } )(),
